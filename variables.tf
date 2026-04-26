@@ -54,7 +54,13 @@ variable "allowed_cidr_blocks" {
 # ─────────────────────────────────────────
 
 variable "key_name" {
-  description = "Name of an existing EC2 Key Pair for SSH / RDP password decryption"
+  description = "Name of the EC2 Key Pair for SSH access to runner instances"
+  type        = string
+  default     = null
+}
+
+variable "key_pair_public_key_path" {
+  description = "Path to the PUBLIC key file (.pub) for the EC2 key pair. Set to null to skip key pair creation (if it already exists in AWS)."
   type        = string
   default     = null
 }

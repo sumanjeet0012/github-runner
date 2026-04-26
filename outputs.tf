@@ -1,4 +1,23 @@
 # ─────────────────────────────────────────
+# Networking (read-only data sources)
+# ─────────────────────────────────────────
+
+output "vpc_id" {
+  description = "VPC where runner instances are launched"
+  value       = data.aws_vpc.main.id
+}
+
+output "subnet_id" {
+  description = "Subnet where runner instances are launched"
+  value       = data.aws_subnet.main.id
+}
+
+output "internet_gateway_id" {
+  description = "Internet Gateway attached to the VPC (confirms outbound internet access)"
+  value       = data.aws_internet_gateway.main.id
+}
+
+# ─────────────────────────────────────────
 # Ephemeral runner infrastructure
 # ─────────────────────────────────────────
 
