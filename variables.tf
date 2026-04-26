@@ -60,6 +60,22 @@ variable "key_name" {
 }
 
 # ─────────────────────────────────────────
+# GitHub PAT – AWS Secrets Manager
+# ─────────────────────────────────────────
+
+variable "github_pat_secret_name" {
+  description = "Name for the AWS Secrets Manager secret that will store the GitHub PAT"
+  type        = string
+  default     = "github-pat"
+}
+
+variable "github_pat" {
+  description = "GitHub Personal Access Token to store in AWS Secrets Manager"
+  type        = string
+  sensitive   = true
+}
+
+# ─────────────────────────────────────────
 # Ubuntu instances
 # ─────────────────────────────────────────
 

@@ -60,3 +60,17 @@ output "security_group_id" {
   description = "ID of the shared security group"
   value       = aws_security_group.instances.id
 }
+
+# ─────────────────────────────────────────
+# GitHub PAT secret
+# ─────────────────────────────────────────
+
+output "github_pat_secret_arn" {
+  description = "ARN of the AWS Secrets Manager secret holding the GitHub PAT"
+  value       = aws_secretsmanager_secret.github_pat.arn
+}
+
+output "github_pat_secret_name" {
+  description = "Name of the AWS Secrets Manager secret holding the GitHub PAT"
+  value       = aws_secretsmanager_secret.github_pat.name
+}

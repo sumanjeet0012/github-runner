@@ -50,6 +50,24 @@ data "aws_ami" "windows" {
 }
 
 # ─────────────────────────────────────────
+# GitHub PAT – AWS Secrets Manager
+# ─────────────────────────────────────────
+
+resource "aws_secretsmanager_secret" "github_pat" {
+  name        = var.github_pat_secret_name
+  description = "GitHub Personal Access Token for ${var.project_name}"
+
+  tags = merge(var.common_tags, {
+    Name = var.github_pat_secret_name
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "github_pat" {
+  secret_id     = aws_secretsmanager_secret.github_pat.id
+  secret_string = var.github_pat
+}
+
+# ─────────────────────────────────────────
 # Security Group
 # ─────────────────────────────────────────
 

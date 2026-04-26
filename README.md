@@ -96,6 +96,47 @@ ssh -i ~/.ssh/<your-key>.pem ubuntu@<ubuntu_public_ip>
 
 ---
 
+## GitHub PAT – AWS Secrets Manager
+
+The project stores a GitHub Personal Access Token (PAT) securely in **AWS Secrets Manager**.
+
+### How it works
+
+1. Set the two variables in `terraform.tfvars`:
+
+   ```hcl
+   github_pat_secret_name = "github-pat"           # name for the secret in AWS
+   github_pat             = "ghp_xxxxxxxxxxxx"      # your actual PAT value
+   ```
+
+2. Run `terraform apply` — Terraform creates:
+   - An **AWS Secrets Manager secret** with the given name.
+   - A **secret version** containing the PAT as a plain string.
+
+3. After apply, the secret ARN is printed as an output:
+
+   ```bash
+   terraform output github_pat_secret_arn
+   ```
+
+### Retrieving the PAT later
+
+```bash
+# via AWS CLI
+aws secretsmanager get-secret-value \
+  --secret-id github-pat \
+  --query SecretString \
+  --output text
+```
+
+### Security notes
+
+- `github_pat` is marked **`sensitive = true`** in Terraform — it will never appear in plan/apply output.
+- `terraform.tfvars` is **git-ignored** — never commit it.
+- In production, restrict access to the secret via an IAM resource policy.
+
+---
+
 ## Destroy
 
 ```bash
