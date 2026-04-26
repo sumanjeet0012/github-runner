@@ -76,6 +76,68 @@ Set either count to `0` to skip that OS entirely.
 | `windows_instance_type` | `t3.medium` | EC2 type for Windows |
 | `windows_root_volume_size` | `50` | Root disk size (GiB) |
 | `allowed_cidr_blocks` | `["0.0.0.0/0"]` | IPs allowed for SSH/RDP |
+| `github_runner_scope` | `repo` | `repo` or `org` |
+| `github_repo_url` | `""` | Full repo URL (scope=repo) |
+| `github_org_name` | `""` | GitHub org name (scope=org) |
+| `github_runner_labels` | `self-hosted,linux,x64` | Comma-separated runner labels |
+| `github_runner_name_prefix` | `ec2-runner` | Prefix for runner name |
+
+---
+
+## GitHub Actions Runner (Ubuntu)
+
+Every Ubuntu instance automatically registers itself as a **self-hosted GitHub Actions runner** on first boot.
+
+### How it works
+
+```
+EC2 boots
+  └─ user_data script runs
+       ├─ apt update + install curl, jq, unzip
+       ├─ install AWS CLI v2
+       ├─ fetch PAT from AWS Secrets Manager (no plain-text secret on disk)
+       ├─ download latest actions/runner release
+       ├─ write entrypoint.sh → /usr/local/bin/github-runner-entrypoint.sh
+       └─ create + start systemd service `github-runner`
+             └─ entrypoint.sh calls GitHub API → gets short-lived token → ./config.sh + ./run.sh
+```
+
+### Runner variables in `terraform.tfvars`
+
+```hcl
+# Register to a single repository
+github_runner_scope       = "repo"
+github_repo_url           = "https://github.com/my-org/my-repo"
+github_org_name           = ""   # leave blank for repo scope
+github_runner_labels      = "self-hosted,linux,x64"
+github_runner_name_prefix = "ec2-runner"
+
+# --- OR --- register to an entire organisation
+github_runner_scope       = "org"
+github_repo_url           = ""
+github_org_name           = "my-org"
+```
+
+### IAM permissions
+
+Terraform automatically creates:
+- An **IAM role** (`<project>-runner-role`) attached to every Ubuntu instance
+- An **inline policy** that grants `secretsmanager:GetSecretValue` **only** for the GitHub PAT secret
+
+The instance never stores the PAT on disk — it is fetched at boot time and passed to the runner via a systemd `Environment=` directive (kept in memory only).
+
+### Checking runner status on the instance
+
+```bash
+# SSH in
+ssh -i ~/.ssh/<key>.pem ubuntu@<ubuntu_public_ip>
+
+# View live service logs
+sudo journalctl -u github-runner -f
+
+# Check service status
+sudo systemctl status github-runner
+```
 
 ---
 

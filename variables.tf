@@ -60,6 +60,45 @@ variable "key_name" {
 }
 
 # ─────────────────────────────────────────
+# GitHub Runner configuration
+# ─────────────────────────────────────────
+
+variable "github_runner_scope" {
+  description = "Scope of the runner: 'repo' or 'org'"
+  type        = string
+  default     = "repo"
+
+  validation {
+    condition     = contains(["repo", "org"], var.github_runner_scope)
+    error_message = "github_runner_scope must be 'repo' or 'org'."
+  }
+}
+
+variable "github_repo_url" {
+  description = "Full URL of the GitHub repo, e.g. https://github.com/owner/repo (used when scope=repo)"
+  type        = string
+  default     = ""
+}
+
+variable "github_org_name" {
+  description = "GitHub organisation name (used when scope=org)"
+  type        = string
+  default     = ""
+}
+
+variable "github_runner_labels" {
+  description = "Comma-separated list of extra labels to apply to each runner, e.g. 'self-hosted,linux,x64'"
+  type        = string
+  default     = "self-hosted,linux,x64"
+}
+
+variable "github_runner_name_prefix" {
+  description = "Prefix for the runner name. Instance index is appended automatically."
+  type        = string
+  default     = "ec2-runner"
+}
+
+# ─────────────────────────────────────────
 # GitHub PAT – AWS Secrets Manager
 # ─────────────────────────────────────────
 
