@@ -93,11 +93,6 @@ data "aws_iam_policy_document" "read_pat_secret" {
     effect  = "Allow"
     actions = ["ec2:TerminateInstances"]
     resources = ["*"]
-    condition {
-      test     = "StringEquals"
-      variable = "ec2:ResourceTag/Role"
-      values   = ["github-runner"]
-    }
   }
 }
 
@@ -272,8 +267,82 @@ resource "aws_launch_template" "runner" {
 }
 
 # ─────────────────────────────────────────
-# Windows Instances
+# Windows Launch Template (ephemeral runners)
 # ─────────────────────────────────────────
+
+resource "aws_launch_template" "runner_windows" {
+  name_prefix   = "${var.project_name}-runner-windows-"
+  image_id      = data.aws_ami.windows.id
+  instance_type = var.windows_instance_type
+  key_name      = var.key_name
+
+  iam_instance_profile {
+    name = aws_iam_instance_profile.runner.name
+  }
+
+  network_interfaces {
+    associate_public_ip_address = var.associate_public_ip
+    security_groups             = [aws_security_group.instances.id]
+    delete_on_termination       = true
+  }
+
+  block_device_mappings {
+    device_name = "/dev/sda1"
+    ebs {
+      volume_type           = "gp3"
+      volume_size           = var.windows_root_volume_size
+      delete_on_termination = true
+      encrypted             = true
+    }
+  }
+
+  # The runner name is injected at launch time via the RunnerName instance tag.
+  # user_data reads it from the EC2 metadata service.
+  # IMPORTANT: <powershell> tags required by EC2Launch v2 to execute PowerShell user_data
+  user_data = base64encode(join("", [
+    "<powershell>\n",
+    templatefile("${path.module}/user_data.ps1.tpl", {
+      aws_region             = var.aws_region
+      github_pat_secret_name = var.github_pat_secret_name
+      runner_scope           = var.github_runner_scope
+      repo_url               = var.github_runner_scope == "repo" ? var.github_repo_url : ""
+      org_name               = var.github_runner_scope == "org" ? var.github_org_name : ""
+      runner_labels          = var.github_runner_labels_windows
+    }),
+    "\n</powershell>"
+  ]))
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = merge(var.common_tags, {
+      Name = "${var.project_name}-runner-windows"
+      OS   = "Windows"
+      Role = "github-runner"
+    })
+  }
+
+  tag_specifications {
+    resource_type = "volume"
+    tags = merge(var.common_tags, {
+      Name = "${var.project_name}-runner-windows-vol"
+      Role = "github-runner"
+    })
+  }
+
+  tags = merge(var.common_tags, {
+    Name = "${var.project_name}-runner-windows-lt"
+  })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# ─────────────────────────────────────────
+# Windows Instances (legacy - kept for backwards compatibility)
+# ─────────────────────────────────────────
+# Note: For ephemeral runners managed by Lambda, set windows_instance_count = 0
+# and use the Windows launch template instead
 
 resource "aws_instance" "windows" {
   count = var.windows_instance_count

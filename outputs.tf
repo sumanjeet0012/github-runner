@@ -22,8 +22,13 @@ output "internet_gateway_id" {
 # ─────────────────────────────────────────
 
 output "runner_launch_template_id" {
-  description = "ID of the EC2 Launch Template used to spin up ephemeral runners"
+  description = "ID of the EC2 Launch Template used to spin up ephemeral Linux runners"
   value       = aws_launch_template.runner.id
+}
+
+output "runner_launch_template_id_windows" {
+  description = "ID of the EC2 Launch Template used to spin up ephemeral Windows runners"
+  value       = aws_launch_template.runner_windows.id
 }
 
 output "ubuntu_ami_id" {

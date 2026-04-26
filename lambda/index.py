@@ -10,13 +10,28 @@ logger.setLevel(logging.INFO)
 
 sqs = boto3.client("sqs")
 
-WINDOWS_SKIP   = {"windows"}
-LINUX_REQUIRED = {"self-hosted", "linux"}
+REQUIRED = {"self-hosted"}
+LINUX_LABELS = {"linux"}
+WINDOWS_LABELS = {"windows"}
+
+
+def get_runner_type(labels):
+    """Determine runner type (linux, windows, or None) based on labels"""
+    s = {l.lower() for l in labels}
+    # Must have self-hosted label
+    if not (s & REQUIRED):
+        return None
+    # Check for OS-specific label
+    if s & WINDOWS_LABELS:
+        return "windows"
+    if s & LINUX_LABELS:
+        return "linux"
+    return None
 
 
 def should_handle(labels):
-    s = {l.lower() for l in labels}
-    return not (s & WINDOWS_SKIP) and bool(s & LINUX_REQUIRED)
+    """Check if we should handle this job"""
+    return get_runner_type(labels) is not None
 
 
 def verify_signature(body, header):

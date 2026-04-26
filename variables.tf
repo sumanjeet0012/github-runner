@@ -93,9 +93,15 @@ variable "github_org_name" {
 }
 
 variable "github_runner_labels" {
-  description = "Comma-separated list of extra labels to apply to each runner, e.g. 'self-hosted,linux,x64'"
+  description = "Comma-separated list of extra labels to apply to each Linux runner, e.g. 'self-hosted,linux,x64'"
   type        = string
   default     = "self-hosted,linux,x64"
+}
+
+variable "github_runner_labels_windows" {
+  description = "Comma-separated list of extra labels to apply to each Windows runner, e.g. 'self-hosted,windows,x64'"
+  type        = string
+  default     = "self-hosted,windows,x64"
 }
 
 variable "github_runner_name_prefix" {

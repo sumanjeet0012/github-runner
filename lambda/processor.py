@@ -47,9 +47,28 @@ def decrement_count():
         raise
 
 
-def launch_runner(job_id, job_name):
-    lt_id      = os.environ["LAUNCH_TEMPLATE_ID"]
-    lt_version = os.environ.get("LAUNCH_TEMPLATE_VERSION", "$Latest")
+def get_runner_type(labels):
+    """Determine runner type (linux or windows) based on labels"""
+    s = {l.lower() for l in labels}
+    if "windows" in s:
+        return "windows"
+    return "linux"  # default to linux
+
+
+def launch_runner(job_id, job_name, runner_type):
+    """Launch an EC2 instance for a GitHub Actions runner
+    
+    Args:
+        job_id: GitHub workflow job ID
+        job_name: GitHub workflow job name
+        runner_type: 'linux' or 'windows'
+    """
+    if runner_type == "windows":
+        lt_id = os.environ.get("LAUNCH_TEMPLATE_ID_WINDOWS", os.environ.get("LAUNCH_TEMPLATE_ID"))
+    else:
+        lt_id = os.environ["LAUNCH_TEMPLATE_ID"]
+    
+    lt_version = os.environ.get("LAUNCH_TEMPLATE_VERSION", "$Default")
     inst_type  = os.environ.get("INSTANCE_TYPE", "")
     prefix     = os.environ.get("RUNNER_NAME_PREFIX", "ec2-runner")
     name       = "{}-{}".format(prefix, job_id)
@@ -63,6 +82,7 @@ def launch_runner(job_id, job_name):
             "Tags": [
                 {"Key": "Name",          "Value": name},
                 {"Key": "Role",          "Value": "github-runner"},
+                {"Key": "OS",            "Value": runner_type.capitalize()},
                 {"Key": "GitHubJobId",   "Value": str(job_id)},
                 {"Key": "GitHubJobName", "Value": job_name[:255]},
                 {"Key": "ManagedBy",     "Value": "Terraform"},
@@ -70,12 +90,13 @@ def launch_runner(job_id, job_name):
             ],
         }],
     )
-    if inst_type:
+    # Only override instance type for Linux runners (Windows uses launch template default)
+    if inst_type and runner_type == "linux":
         kwargs["InstanceType"] = inst_type
 
     r   = ec2.run_instances(**kwargs)
     iid = r["Instances"][0]["InstanceId"]
-    logger.info("Launched %s for job %s (%s)", iid, job_id, job_name)
+    logger.info("Launched %s (%s) for job %s (%s)", iid, runner_type, job_id, job_name)
     return iid
 
 
@@ -92,8 +113,9 @@ def handler(event, context):
         action   = msg.get("action", "")
         job_id   = msg.get("job_id", 0)
         job_name = msg.get("job_name", "unknown")
+        labels   = msg.get("labels", [])
 
-        logger.info("Processing action=%s job_id=%s", action, job_id)
+        logger.info("Processing action=%s job_id=%s labels=%s", action, job_id, labels)
 
         if action == "completed":
             new_count = decrement_count()
@@ -122,8 +144,12 @@ def handler(event, context):
             logger.exception("Failed to increment pool counter for job %s", job_id)
             raise
 
+        # Determine runner type based on job labels
+        runner_type = get_runner_type(labels)
+        logger.info("Job %s requires %s runner", job_id, runner_type)
+
         try:
-            iid = launch_runner(job_id, job_name)
+            iid = launch_runner(job_id, job_name, runner_type)
             logger.info("Launched %s for job %s", iid, job_id)
         except Exception:
             decrement_count()

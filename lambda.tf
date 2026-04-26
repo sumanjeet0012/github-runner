@@ -212,13 +212,14 @@ resource "aws_lambda_function" "processor" {
 
   environment {
     variables = {
-      LAUNCH_TEMPLATE_ID      = aws_launch_template.runner.id
-      LAUNCH_TEMPLATE_VERSION = "$Latest"
-      INSTANCE_TYPE           = var.ubuntu_instance_type
-      RUNNER_NAME_PREFIX      = var.github_runner_name_prefix
-      MAX_POOL_SIZE           = tostring(var.runner_max_pool_size)
-      DYNAMODB_TABLE          = aws_dynamodb_table.runner_pool.name
-      JOB_QUEUE_URL           = aws_sqs_queue.runner_jobs.url
+      LAUNCH_TEMPLATE_ID         = aws_launch_template.runner.id
+      LAUNCH_TEMPLATE_ID_WINDOWS = aws_launch_template.runner_windows.id
+      LAUNCH_TEMPLATE_VERSION    = "$Latest"
+      INSTANCE_TYPE              = var.ubuntu_instance_type
+      RUNNER_NAME_PREFIX         = var.github_runner_name_prefix
+      MAX_POOL_SIZE              = tostring(var.runner_max_pool_size)
+      DYNAMODB_TABLE             = aws_dynamodb_table.runner_pool.name
+      JOB_QUEUE_URL              = aws_sqs_queue.runner_jobs.url
     }
   }
 
