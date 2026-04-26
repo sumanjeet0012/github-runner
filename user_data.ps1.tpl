@@ -42,8 +42,8 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
     Write-Log "Chocolatey already present - skipping."
 }
 
-Write-Log "=== Installing core dependencies (git, jq, awscli) ==="
-foreach ($pkg in @("git", "jq", "awscli")) {
+Write-Log "=== Installing core dependencies (git, jq, awscli, docker-desktop) ==="
+foreach ($pkg in @("git", "jq", "awscli", "docker-desktop")) {
     Write-Log "  Installing $pkg ..."
     choco install $pkg -y --no-progress | Out-Null
 }

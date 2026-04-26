@@ -13,6 +13,19 @@ unzip -q /tmp/awscliv2.zip -d /tmp
 /tmp/aws/install
 rm -rf /tmp/awscliv2.zip /tmp/aws
 
+echo "=== Installing Docker ==="
+# Install Docker using official Docker repository
+apt-get install -y ca-certificates gnupg lsb-release
+mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Start Docker daemon
+systemctl enable docker
+systemctl start docker
+
 echo "=== Fetching GitHub PAT from Secrets Manager ==="
 ACCESS_TOKEN=$(aws secretsmanager get-secret-value \
   --region ${aws_region} \
@@ -33,15 +46,27 @@ RUNNER_NAME=$(aws ec2 describe-tags \
   --region "$REGION" \
   --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=RunnerName" \
   --query 'Tags[0].Value' \
-  --output text 2>/dev/null || echo "${runner_name}")
-# Fall back to template value if tag is missing or is the placeholder
+  --output text 2>/dev/null || true)
+# Fall back to Name tag, then to instance-id based name
 if [[ -z "$RUNNER_NAME" || "$RUNNER_NAME" == "None" || "$RUNNER_NAME" == "__FROM_TAG__" ]]; then
-  RUNNER_NAME="${runner_name}-$INSTANCE_ID"
+  RUNNER_NAME=$(aws ec2 describe-tags \
+    --region "$REGION" \
+    --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=Name" \
+    --query 'Tags[0].Value' \
+    --output text 2>/dev/null || true)
+fi
+if [[ -z "$RUNNER_NAME" || "$RUNNER_NAME" == "None" ]]; then
+  RUNNER_NAME="ec2-runner-$INSTANCE_ID"
 fi
 echo "Runner name: $RUNNER_NAME"
 
 echo "=== Creating actions-runner user ==="
 useradd -m -s /bin/bash actions-runner || true
+echo "actions-runner ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/actions-runner
+chmod 440 /etc/sudoers.d/actions-runner
+
+# Add actions-runner user to docker group so it can run Docker commands without sudo
+usermod -aG docker actions-runner
 
 echo "=== Downloading GitHub Actions Runner ==="
 RUNNER_VERSION=$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | jq -r '.tag_name' | sed 's/v//')
@@ -90,17 +115,17 @@ else
   echo "[wrapper] Job ID: $JOB_ID. Checking job status on GitHub..."
   
   # Build GitHub API URL based on runner scope
-  if [[ "${RUNNER_SCOPE:-}" == "org" && -n "${ORG_NAME:-}" ]]; then
+  if [[ "$${RUNNER_SCOPE:-}" == "org" && -n "$${ORG_NAME:-}" ]]; then
     # For org-scoped runners, we need to get the job from a repo (use actions API)
     # Try the universal-connectivity repo first, then fall back
-    JOB_URL="https://api.github.com/repos/${ORG_NAME}/universal-connectivity/actions/jobs/$JOB_ID"
+    JOB_URL="https://api.github.com/repos/$${ORG_NAME}/universal-connectivity/actions/jobs/$JOB_ID"
   else
     JOB_URL="https://api.github.com/repos/$(echo $REPO_URL | awk -F/ '{print $(NF-1)"/"$NF}')/actions/jobs/$JOB_ID"
   fi
   
   # Query GitHub API for job status
   JOB_STATUS=$(curl -fsSL \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+    -H "Authorization: Bearer $${ACCESS_TOKEN}" \
     -H "Accept: application/vnd.github+json" \
     "$JOB_URL" 2>/dev/null | jq -r '.status // "unknown"' || echo "unknown")
   
