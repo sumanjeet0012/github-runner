@@ -1,25 +1,20 @@
 # ─────────────────────────────────────────
-# Ubuntu outputs
+# Ephemeral runner infrastructure
 # ─────────────────────────────────────────
 
-output "ubuntu_instance_ids" {
-  description = "Instance IDs of all Ubuntu instances"
-  value       = aws_instance.ubuntu[*].id
-}
-
-output "ubuntu_public_ips" {
-  description = "Public IP addresses of Ubuntu instances (if assigned)"
-  value       = aws_instance.ubuntu[*].public_ip
-}
-
-output "ubuntu_private_ips" {
-  description = "Private IP addresses of Ubuntu instances"
-  value       = aws_instance.ubuntu[*].private_ip
+output "runner_launch_template_id" {
+  description = "ID of the EC2 Launch Template used to spin up ephemeral runners"
+  value       = aws_launch_template.runner.id
 }
 
 output "ubuntu_ami_id" {
-  description = "AMI ID used for Ubuntu instances"
+  description = "AMI ID used for Ubuntu runner instances"
   value       = data.aws_ami.ubuntu.id
+}
+
+output "webhook_url" {
+  description = "GitHub webhook URL – register this in your org/repo webhook settings (POST, application/json, workflow_job events)"
+  value       = "${aws_apigatewayv2_stage.webhook.invoke_url}webhook"
 }
 
 # ─────────────────────────────────────────

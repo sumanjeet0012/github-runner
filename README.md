@@ -84,59 +84,85 @@ Set either count to `0` to skip that OS entirely.
 
 ---
 
-## GitHub Actions Runner (Ubuntu)
+## GitHub Actions Runner (Ubuntu) – Ephemeral per-job
 
-Every Ubuntu instance automatically registers itself as a **self-hosted GitHub Actions runner** on first boot.
+Every GitHub Actions job gets a **brand-new EC2 instance** that registers as a runner, executes the job, and then **self-terminates**. No standing instances, no stale state.
 
-### How it works
+### Architecture
 
 ```
-EC2 boots
-  └─ user_data script runs
-       ├─ apt update + install curl, jq, unzip
-       ├─ install AWS CLI v2
-       ├─ fetch PAT from AWS Secrets Manager (no plain-text secret on disk)
-       ├─ download latest actions/runner release
-       ├─ write entrypoint.sh → /usr/local/bin/github-runner-entrypoint.sh
-       └─ create + start systemd service `github-runner`
-             └─ entrypoint.sh calls GitHub API → gets short-lived token → ./config.sh + ./run.sh
+GitHub workflow_job event
+  └─ API Gateway POST /webhook
+       └─ Lambda (runner_webhook)
+            ├─ verifies HMAC signature
+            └─ on "queued" → EC2 RunInstances (Launch Template)
+                  └─ EC2 instance boots
+                       ├─ user_data: install deps, fetch PAT from Secrets Manager
+                       ├─ register as ephemeral runner (--ephemeral flag)
+                       ├─ run ONE job
+                       └─ self-terminate via aws ec2 terminate-instances
 ```
+
+### New resources created by Terraform
+
+| Resource | Purpose |
+|---|---|
+| `aws_launch_template.runner` | Blueprint for ephemeral runner instances |
+| `aws_lambda_function.webhook` | Receives GitHub webhook, launches EC2 |
+| `aws_apigatewayv2_api.webhook` | HTTP API endpoint for the webhook |
+| `aws_iam_role.lambda` | IAM role for Lambda (EC2 RunInstances + PassRole) |
+
+### Setup steps
+
+**1. Set your webhook secret in `terraform.tfvars`:**
+
+```hcl
+github_webhook_secret = "some-long-random-string"
+```
+
+**2. Apply:**
+
+```bash
+terraform apply
+```
+
+**3. Copy the webhook URL from the output:**
+
+```bash
+terraform output webhook_url
+# e.g. https://abc123.execute-api.eu-north-1.amazonaws.com/webhook
+```
+
+**4. Register the webhook in GitHub:**
+
+Go to **https://github.com/organizations/py-libp2p-runners/settings/hooks** → Add webhook:
+- **Payload URL**: the URL from step 3
+- **Content type**: `application/json`
+- **Secret**: same value as `github_webhook_secret`
+- **Events**: select **Workflow jobs** only
+
+**5. Trigger a workflow** — a fresh EC2 instance will spin up, pick up the job, and terminate itself automatically.
 
 ### Runner variables in `terraform.tfvars`
 
 ```hcl
-# Register to a single repository
-github_runner_scope       = "repo"
-github_repo_url           = "https://github.com/my-org/my-repo"
-github_org_name           = ""   # leave blank for repo scope
+github_runner_scope       = "org"
+github_org_name           = "py-libp2p-runners"
 github_runner_labels      = "self-hosted,linux,x64"
 github_runner_name_prefix = "ec2-runner"
-
-# --- OR --- register to an entire organisation
-github_runner_scope       = "org"
-github_repo_url           = ""
-github_org_name           = "my-org"
+github_webhook_secret     = "your-secret-here"
 ```
 
-### IAM permissions
-
-Terraform automatically creates:
-- An **IAM role** (`<project>-runner-role`) attached to every Ubuntu instance
-- An **inline policy** that grants `secretsmanager:GetSecretValue` **only** for the GitHub PAT secret
-
-The instance never stores the PAT on disk — it is fetched at boot time and passed to the runner via a systemd `Environment=` directive (kept in memory only).
-
-### Checking runner status on the instance
+### Checking runner logs on a live instance
 
 ```bash
-# SSH in
-ssh -i ~/.ssh/<key>.pem ubuntu@<ubuntu_public_ip>
+ssh -i ~/.ssh/libp2p-runner.pem ubuntu@<instance_public_ip>
 
-# View live service logs
+# Bootstrap log
+sudo tail -f /var/log/github-runner-init.log
+
+# Runner registration + job output
 sudo journalctl -u github-runner -f
-
-# Check service status
-sudo systemctl status github-runner
 ```
 
 ---

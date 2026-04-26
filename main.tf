@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.0"
+    }
   }
 }
 
@@ -81,6 +85,19 @@ data "aws_iam_policy_document" "read_pat_secret" {
       "secretsmanager:DescribeSecret",
     ]
     resources = [aws_secretsmanager_secret.github_pat.arn]
+  }
+
+  # Allow the runner instance to terminate itself after the job completes
+  statement {
+    sid     = "SelfTerminate"
+    effect  = "Allow"
+    actions = ["ec2:TerminateInstances"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:ResourceTag/Role"
+      values   = ["github-runner"]
+    }
   }
 }
 
@@ -182,56 +199,76 @@ resource "aws_security_group" "instances" {
 }
 
 # ─────────────────────────────────────────
-# Ubuntu Instances
+# EC2 Launch Template (ephemeral runners)
 # ─────────────────────────────────────────
+#
+# The Launch Template is the blueprint used by the webhook Lambda to spin up
+# a fresh instance per job. The static aws_instance.ubuntu is removed –
+# ubuntu_instance_count is no longer used for runners.
 
-locals {
-  # Build the environment variables the entrypoint.sh expects
-  runner_env = {
-    RUNNER_SCOPE = var.github_runner_scope
-    REPO_URL     = var.github_runner_scope == "repo" ? var.github_repo_url : ""
-    ORG_NAME     = var.github_runner_scope == "org" ? var.github_org_name : ""
-    LABELS       = var.github_runner_labels
-  }
-}
+resource "aws_launch_template" "runner" {
+  name_prefix   = "${var.project_name}-runner-"
+  image_id      = data.aws_ami.ubuntu.id
+  instance_type = var.ubuntu_instance_type
+  key_name      = var.key_name
 
-resource "aws_instance" "ubuntu" {
-  count = var.ubuntu_instance_count
-
-  ami                    = data.aws_ami.ubuntu.id
-  instance_type          = var.ubuntu_instance_type
-  key_name               = var.key_name
-  subnet_id              = var.subnet_id
-  vpc_security_group_ids = [aws_security_group.instances.id]
-  iam_instance_profile   = aws_iam_instance_profile.runner.name
-
-  associate_public_ip_address = var.associate_public_ip
-
-  root_block_device {
-    volume_type           = "gp3"
-    volume_size           = var.ubuntu_root_volume_size
-    delete_on_termination = true
-    encrypted             = true
+  iam_instance_profile {
+    name = aws_iam_instance_profile.runner.name
   }
 
-  user_data = templatefile("${path.module}/user_data.sh.tpl", {
+  network_interfaces {
+    associate_public_ip_address = var.associate_public_ip
+    security_groups             = [aws_security_group.instances.id]
+    delete_on_termination       = true
+  }
+
+  block_device_mappings {
+    device_name = "/dev/sda1"
+    ebs {
+      volume_type           = "gp3"
+      volume_size           = var.ubuntu_root_volume_size
+      delete_on_termination = true
+      encrypted             = true
+    }
+  }
+
+  # The runner name is injected at launch time via the RunnerName instance tag.
+  # user_data reads it from the EC2 metadata service.
+  user_data = base64encode(templatefile("${path.module}/user_data.sh.tpl", {
     aws_region             = var.aws_region
     github_pat_secret_name = var.github_pat_secret_name
     runner_scope           = var.github_runner_scope
     repo_url               = var.github_runner_scope == "repo" ? var.github_repo_url : ""
     org_name               = var.github_runner_scope == "org" ? var.github_org_name : ""
     runner_labels          = var.github_runner_labels
-    runner_name            = "${var.github_runner_name_prefix}-${count.index + 1}"
+    runner_name            = "__FROM_TAG__" # overridden at runtime from instance tag
     entrypoint_script      = file("${path.module}/entrypoint.sh")
-  })
+  }))
 
-  user_data_replace_on_change = true
+  tag_specifications {
+    resource_type = "instance"
+    tags = merge(var.common_tags, {
+      Name = "${var.project_name}-runner"
+      OS   = "Ubuntu"
+      Role = "github-runner"
+    })
+  }
+
+  tag_specifications {
+    resource_type = "volume"
+    tags = merge(var.common_tags, {
+      Name = "${var.project_name}-runner-vol"
+      Role = "github-runner"
+    })
+  }
 
   tags = merge(var.common_tags, {
-    Name = "${var.project_name}-ubuntu-${count.index + 1}"
-    OS   = "Ubuntu"
-    Role = "github-runner"
+    Name = "${var.project_name}-runner-lt"
   })
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # ─────────────────────────────────────────

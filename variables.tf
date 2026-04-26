@@ -98,6 +98,13 @@ variable "github_runner_name_prefix" {
   default     = "ec2-runner"
 }
 
+variable "github_webhook_secret" {
+  description = "Secret used to verify GitHub webhook payloads (set the same value in GitHub org webhook settings)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # ─────────────────────────────────────────
 # GitHub PAT – AWS Secrets Manager
 # ─────────────────────────────────────────

@@ -26,6 +26,20 @@ if [[ -z "$ACCESS_TOKEN" ]]; then
 fi
 echo "PAT fetched successfully."
 
+echo "=== Resolving runner name from instance tag ==="
+INSTANCE_ID=$(curl -fsSL http://169.254.169.254/latest/meta-data/instance-id)
+REGION=$(curl -fsSL http://169.254.169.254/latest/meta-data/placement/region)
+RUNNER_NAME=$(aws ec2 describe-tags \
+  --region "$REGION" \
+  --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=RunnerName" \
+  --query 'Tags[0].Value' \
+  --output text 2>/dev/null || echo "${runner_name}")
+# Fall back to template value if tag is missing or is the placeholder
+if [[ -z "$RUNNER_NAME" || "$RUNNER_NAME" == "None" || "$RUNNER_NAME" == "__FROM_TAG__" ]]; then
+  RUNNER_NAME="${runner_name}-$INSTANCE_ID"
+fi
+echo "Runner name: $RUNNER_NAME"
+
 echo "=== Creating actions-runner user ==="
 useradd -m -s /bin/bash actions-runner || true
 
@@ -50,10 +64,31 @@ ${entrypoint_script}
 ENTRYPOINT_EOF
 chmod +x /usr/local/bin/github-runner-entrypoint.sh
 
+echo "=== Writing runner wrapper (run + self-terminate) ==="
+cat > /usr/local/bin/github-runner-wrapper.sh << 'WRAPPER_EOF'
+#!/bin/bash
+# Run the GitHub Actions runner (ephemeral – exits after one job).
+# Then terminate this EC2 instance regardless of exit code.
+set -euo pipefail
+
+INSTANCE_ID=$(curl -fsSL http://169.254.169.254/latest/meta-data/instance-id)
+REGION=$(curl -fsSL http://169.254.169.254/latest/meta-data/placement/region)
+
+echo "[wrapper] Starting runner on instance $INSTANCE_ID"
+
+# Run the entrypoint; capture exit code but don't abort the wrapper
+/usr/local/bin/github-runner-entrypoint.sh || true
+RUNNER_EXIT=$?
+
+echo "[wrapper] Runner exited with code $RUNNER_EXIT. Terminating instance $INSTANCE_ID ..."
+aws ec2 terminate-instances --region "$REGION" --instance-ids "$INSTANCE_ID"
+WRAPPER_EOF
+chmod +x /usr/local/bin/github-runner-wrapper.sh
+
 echo "=== Creating systemd service ==="
 cat > /etc/systemd/system/github-runner.service << SERVICE_EOF
 [Unit]
-Description=GitHub Actions Runner
+Description=GitHub Actions Runner (ephemeral)
 After=network-online.target
 Wants=network-online.target
 
@@ -66,10 +101,10 @@ Environment="RUNNER_SCOPE=${runner_scope}"
 Environment="REPO_URL=${repo_url}"
 Environment="ORG_NAME=${org_name}"
 Environment="LABELS=${runner_labels}"
-Environment="RUNNER_NAME=${runner_name}"
-ExecStart=/usr/local/bin/github-runner-entrypoint.sh
-Restart=on-failure
-RestartSec=10
+Environment="RUNNER_NAME=$RUNNER_NAME"
+# Use the wrapper so the instance self-terminates after the job (pass or fail)
+ExecStart=/usr/local/bin/github-runner-wrapper.sh
+Restart=no
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=github-runner
