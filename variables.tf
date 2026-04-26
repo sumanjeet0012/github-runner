@@ -105,6 +105,17 @@ variable "github_webhook_secret" {
   default     = ""
 }
 
+variable "runner_max_pool_size" {
+  description = "Maximum number of concurrent EC2 runner instances. New jobs wait in SQS when the pool is full."
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.runner_max_pool_size >= 1 && var.runner_max_pool_size <= 50
+    error_message = "runner_max_pool_size must be between 1 and 50."
+  }
+}
+
 # ─────────────────────────────────────────
 # GitHub PAT – AWS Secrets Manager
 # ─────────────────────────────────────────

@@ -13,8 +13,23 @@ output "ubuntu_ami_id" {
 }
 
 output "webhook_url" {
-  description = "GitHub webhook URL – register this in your org/repo webhook settings (POST, application/json, workflow_job events)"
+  description = "GitHub webhook URL - register this in your org/repo webhook settings (POST, application/json, workflow_job events)"
   value       = "${aws_apigatewayv2_stage.webhook.invoke_url}webhook"
+}
+
+output "sqs_job_queue_url" {
+  description = "SQS queue URL that buffers pending runner jobs"
+  value       = aws_sqs_queue.runner_jobs.url
+}
+
+output "sqs_dlq_url" {
+  description = "Dead-letter queue URL - inspect failed jobs here"
+  value       = aws_sqs_queue.runner_dlq.url
+}
+
+output "dynamodb_pool_table" {
+  description = "DynamoDB table tracking active runner count"
+  value       = aws_dynamodb_table.runner_pool.name
 }
 
 # ─────────────────────────────────────────

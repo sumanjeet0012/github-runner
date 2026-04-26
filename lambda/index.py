@@ -3,14 +3,12 @@ import hmac
 import json
 import logging
 import os
-
 import boto3
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# AWS_REGION is injected automatically by the Lambda runtime
-ec2 = boto3.client("ec2")
+sqs = boto3.client("sqs")
 
 WINDOWS_SKIP   = {"windows"}
 LINUX_REQUIRED = {"self-hosted", "linux"}
@@ -30,39 +28,6 @@ def verify_signature(body, header):
         return False
     expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, header)
-
-
-def launch_runner(job_id, job_name):
-    lt_id      = os.environ["LAUNCH_TEMPLATE_ID"]
-    lt_version = os.environ.get("LAUNCH_TEMPLATE_VERSION", "$Latest")
-    inst_type  = os.environ.get("INSTANCE_TYPE", "")
-    prefix     = os.environ.get("RUNNER_NAME_PREFIX", "ec2-runner")
-    name       = "{}-{}".format(prefix, job_id)
-
-    kwargs = dict(
-        MinCount=1,
-        MaxCount=1,
-        LaunchTemplate={"LaunchTemplateId": lt_id, "Version": lt_version},
-        TagSpecifications=[{
-            "ResourceType": "instance",
-            "Tags": [
-                {"Key": "Name",          "Value": name},
-                {"Key": "Role",          "Value": "github-runner"},
-                {"Key": "GitHubJobId",   "Value": str(job_id)},
-                {"Key": "GitHubJobName", "Value": job_name[:255]},
-                {"Key": "ManagedBy",     "Value": "Terraform"},
-                {"Key": "RunnerName",    "Value": name},
-            ],
-        }],
-    )
-
-    if inst_type:
-        kwargs["InstanceType"] = inst_type
-
-    r   = ec2.run_instances(**kwargs)
-    iid = r["Instances"][0]["InstanceId"]
-    logger.info("Launched %s for job %s (%s)", iid, job_id, job_name)
-    return iid
 
 
 def handler(event, context):
@@ -97,11 +62,31 @@ def handler(event, context):
         if not should_handle(job_labels):
             logger.info("Skipping job %s - labels %s not for this runner", job_id, job_labels)
             return {"statusCode": 200, "body": json.dumps({"status": "skipped"})}
-        try:
-            iid = launch_runner(job_id, job_name)
-        except Exception as exc:
-            logger.exception("Failed to launch runner for job %s", job_id)
-            return {"statusCode": 500, "body": json.dumps({"error": str(exc)})}
-        return {"statusCode": 200, "body": json.dumps({"launched": iid})}
+        queue_url = os.environ["JOB_QUEUE_URL"]
+        sqs.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps({
+                "action":   action,
+                "job_id":   job_id,
+                "job_name": job_name,
+                "labels":   job_labels,
+            }),
+        )
+        logger.info("Enqueued job %s to SQS", job_id)
+        return {"statusCode": 200, "body": json.dumps({"status": "queued", "job_id": job_id})}
+
+    if action == "completed":
+        queue_url = os.environ["JOB_QUEUE_URL"]
+        sqs.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps({
+                "action":   action,
+                "job_id":   job_id,
+                "job_name": job_name,
+                "labels":   job_labels,
+            }),
+        )
+        logger.info("Enqueued completed event for job %s", job_id)
+        return {"statusCode": 200, "body": json.dumps({"status": "ok"})}
 
     return {"statusCode": 200, "body": json.dumps({"status": "ok"})}
