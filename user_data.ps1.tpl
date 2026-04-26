@@ -138,6 +138,47 @@ Push-Location $RunnerDir
 Pop-Location
 Write-Log "Runner configured."
 
+Write-Log "=== Checking if job is still active ==="
+# Fetch job_id from EC2 instance tag
+$JobIdResponse = & aws ec2 describe-tags --region $REGION --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=GitHubJobId" --query 'Tags[0].Value' --output text 2>$null
+$JobId = if ($null -eq $JobIdResponse -or $JobIdResponse -eq "None") { "" } else { $JobIdResponse }
+
+if ([string]::IsNullOrWhiteSpace($JobId)) {
+    Write-Log "WARNING: Could not fetch job_id from EC2 tags. Proceeding anyway."
+} else {
+    Write-Log "Job ID: $JobId. Checking job status on GitHub..."
+    
+    # Build GitHub API URL based on runner scope
+    if ($RunnerScope -eq "org" -and -not [string]::IsNullOrWhiteSpace($OrgName)) {
+        $JobUrl = "https://api.github.com/repos/$OrgName/universal-connectivity/actions/jobs/$JobId"
+    } else {
+        $UriParts = ([System.Uri]$RepoUrl).AbsolutePath.Trim("/").Split("/")
+        $JobUrl = "https://api.github.com/repos/$($UriParts[0])/$($UriParts[1])/actions/jobs/$JobId"
+    }
+    
+    # Query GitHub API for job status
+    try {
+        $JobResponse = Invoke-RestMethod -Uri $JobUrl -Method GET -Headers $AuthHeaders -ErrorAction Stop
+        $JobStatus = $JobResponse.status
+        Write-Log "Job status from GitHub: $JobStatus"
+        
+        # If job is cancelled or completed, don't run it
+        if ($JobStatus -eq "completed" -or $JobStatus -eq "cancelled") {
+            Write-Log "Job $JobId was $JobStatus. Skipping runner execution."
+            Write-Log "Terminating instance $INSTANCE_ID ..."
+            & aws ec2 terminate-instances --region $REGION --instance-ids $INSTANCE_ID
+            Write-Log "=== Done ==="
+            exit 0
+        } elseif ($JobStatus -eq "in_progress" -or $JobStatus -eq "queued") {
+            Write-Log "Job is $JobStatus. Safe to proceed."
+        } else {
+            Write-Log "WARNING: Unexpected job status '$JobStatus'. Proceeding anyway."
+        }
+    } catch {
+        Write-Log "WARNING: Could not query job status: $_. Proceeding anyway."
+    }
+}
+
 Write-Log "=== Starting runner ==="
 Push-Location $RunnerDir
 & .\run.cmd

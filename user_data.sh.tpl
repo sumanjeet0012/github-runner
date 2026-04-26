@@ -64,17 +64,60 @@ ${entrypoint_script}
 ENTRYPOINT_EOF
 chmod +x /usr/local/bin/github-runner-entrypoint.sh
 
-echo "=== Writing runner wrapper (run + self-terminate) ==="
+echo "=== Writing runner wrapper (status check + run + self-terminate) ==="
 cat > /usr/local/bin/github-runner-wrapper.sh << 'WRAPPER_EOF'
 #!/bin/bash
-# Run the GitHub Actions runner (ephemeral – exits after one job).
-# Then terminate this EC2 instance regardless of exit code.
+# Pre-flight check: verify job is still active
+# Run the GitHub Actions runner (ephemeral – exits after one job)
+# Then terminate this EC2 instance regardless of exit code
 set -euo pipefail
 
 INSTANCE_ID=$(curl -fsSL http://169.254.169.254/latest/meta-data/instance-id)
 REGION=$(curl -fsSL http://169.254.169.254/latest/meta-data/placement/region)
 
 echo "[wrapper] Starting runner on instance $INSTANCE_ID"
+
+# Fetch job_id from EC2 instance tag
+JOB_ID=$(aws ec2 describe-tags \
+  --region "$REGION" \
+  --filters "Name=resource-id,Values=$INSTANCE_ID" "Name=key,Values=GitHubJobId" \
+  --query 'Tags[0].Value' \
+  --output text 2>/dev/null || echo "")
+
+if [[ -z "$JOB_ID" || "$JOB_ID" == "None" ]]; then
+  echo "[wrapper] WARNING: Could not fetch job_id from EC2 tags. Proceeding anyway."
+else
+  echo "[wrapper] Job ID: $JOB_ID. Checking job status on GitHub..."
+  
+  # Build GitHub API URL based on runner scope
+  if [[ "${RUNNER_SCOPE:-}" == "org" && -n "${ORG_NAME:-}" ]]; then
+    # For org-scoped runners, we need to get the job from a repo (use actions API)
+    # Try the universal-connectivity repo first, then fall back
+    JOB_URL="https://api.github.com/repos/${ORG_NAME}/universal-connectivity/actions/jobs/$JOB_ID"
+  else
+    JOB_URL="https://api.github.com/repos/$(echo $REPO_URL | awk -F/ '{print $(NF-1)"/"$NF}')/actions/jobs/$JOB_ID"
+  fi
+  
+  # Query GitHub API for job status
+  JOB_STATUS=$(curl -fsSL \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+    -H "Accept: application/vnd.github+json" \
+    "$JOB_URL" 2>/dev/null | jq -r '.status // "unknown"' || echo "unknown")
+  
+  echo "[wrapper] Job status from GitHub: $JOB_STATUS"
+  
+  # If job is cancelled or completed, don't run it
+  if [[ "$JOB_STATUS" == "completed" ]] || [[ "$JOB_STATUS" == "cancelled" ]]; then
+    echo "[wrapper] Job $JOB_ID was $JOB_STATUS. Skipping runner execution."
+    echo "[wrapper] Terminating instance $INSTANCE_ID ..."
+    aws ec2 terminate-instances --region "$REGION" --instance-ids "$INSTANCE_ID"
+    exit 0
+  elif [[ "$JOB_STATUS" == "in_progress" ]] || [[ "$JOB_STATUS" == "queued" ]]; then
+    echo "[wrapper] Job is $JOB_STATUS. Safe to proceed."
+  else
+    echo "[wrapper] WARNING: Unexpected job status '$JOB_STATUS'. Proceeding anyway."
+  fi
+fi
 
 # Run the entrypoint; capture exit code but don't abort the wrapper
 /usr/local/bin/github-runner-entrypoint.sh || true
