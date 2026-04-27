@@ -43,10 +43,11 @@ export DEBIAN_FRONTEND=noninteractive
 # Never prompt for config file conflicts — always keep the new (maintainer) version
 export DPKG_OPTIONS="--force-confnew --force-confdef"
 
-apt-get update -y --allow-releaseinfo-change
+# Wipe stale apt lists before updating (avoids InRelease fopen errors on Ubuntu 24.04)
+rm -rf /var/lib/apt/lists/*
+apt-get clean
 
-# Upgrade all previously installed packages to latest versions (non-interactive)
-apt-get upgrade -y -o Dpkg::Options::="--force-confnew" -o Dpkg::Options::="--force-confdef"
+apt-get update -y
 
 # Core utilities
 apt-get install -y -o Dpkg::Options::="--force-confnew" -o Dpkg::Options::="--force-confdef" \
@@ -67,17 +68,23 @@ apt-get install -y -o Dpkg::Options::="--force-confnew" -o Dpkg::Options::="--fo
 
 # cpp-libp2p: needs ninja-build
 # rust-libp2p wasm tests: needs chromium + chromedriver
+# On Ubuntu 24.04, chromium is delivered via snap by default.
+# Install chromium-browser from the Ubuntu PPA instead to get a real apt package.
 # py-libp2p Makefile: needs protoc (protobuf-compiler) for .proto → _pb2.py generation
 # jvm-libp2p: needs JDK 11 (temurin installed below, but openjdk is the apt fallback)
 # general TLS / crypto builds: libssl-dev
-# wasm-pack build deps: libssl-dev, pkg-config (already above)
 apt-get install -y -o Dpkg::Options::="--force-confnew" -o Dpkg::Options::="--force-confdef" \
   ninja-build \
   protobuf-compiler \
   libssl-dev \
-  chromium-browser \
-  chromium-chromedriver \
   openjdk-11-jdk
+
+# Chromium on Ubuntu 24.04: install from PPA (snap version doesn't work in headless CI)
+add-apt-repository -y ppa:xtradeb/apps
+apt-get update -y
+apt-get install -y -o Dpkg::Options::="--force-confnew" -o Dpkg::Options::="--force-confdef" \
+  chromium \
+  chromium-driver
 
 # ─────────────────────────────────────────────────────────────
 # 2. AWS CLI v2
@@ -325,7 +332,7 @@ chmod a+r /etc/apt/keyrings/adoptium.gpg
 
 echo \
   "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/adoptium.gpg] \
-  https://packages.adoptium.net/artifactory/deb $(lsb_release -cs) main" \
+  https://packages.adoptium.net/artifactory/deb noble main" \
   | tee /etc/apt/sources.list.d/adoptium.list > /dev/null
 
 apt-get update -y
@@ -631,5 +638,5 @@ echo "  make:         $(make --version | head -1)"
 echo "  protoc:       $(protoc --version)"
 echo "  python3:      $(python3 --version)"
 echo "  java:         $(java -version 2>&1 | head -1)"
-echo "  chromium:     $(chromium-browser --version 2>/dev/null || chromium --version 2>/dev/null || echo 'not found')"
-echo "  chromedriver: $(chromedriver --version 2>/dev/null || echo 'not found')"
+echo "  chromium:     $(chromium --version 2>/dev/null || echo 'not found')"
+echo "  chromedriver: $(chromedriver --version 2>/dev/null || chromium-driver --version 2>/dev/null || echo 'not found')"

@@ -168,7 +168,7 @@ variable "ubuntu_instance_type" {
 variable "ubuntu_root_volume_size" {
   description = "Root EBS volume size (GiB) for Ubuntu instances"
   type        = number
-  default     = 20
+  default     = 100
 }
 
 # ─────────────────────────────────────────
