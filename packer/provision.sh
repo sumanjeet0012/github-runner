@@ -459,8 +459,19 @@ cat > /usr/local/bin/github-runner-wrapper.sh << 'EOF'
 # 3. Terminate this EC2 instance regardless of exit code.
 set -euo pipefail
 
-INSTANCE_ID=$(curl -fsSL http://169.254.169.254/latest/meta-data/instance-id)
-REGION=$(curl -fsSL http://169.254.169.254/latest/meta-data/placement/region)
+# IMDSv2: get a session token first, then use it for all metadata calls
+IMDS_TOKEN=$(curl -fsSL --max-time 5 \
+  -X PUT \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 60" \
+  "http://169.254.169.254/latest/api/token")
+
+INSTANCE_ID=$(curl -fsSL --max-time 5 \
+  -H "X-aws-ec2-metadata-token: ${IMDS_TOKEN}" \
+  "http://169.254.169.254/latest/meta-data/instance-id")
+
+REGION=$(curl -fsSL --max-time 5 \
+  -H "X-aws-ec2-metadata-token: ${IMDS_TOKEN}" \
+  "http://169.254.169.254/latest/meta-data/placement/region")
 
 echo "[wrapper] Starting runner on instance ${INSTANCE_ID}"
 
@@ -539,7 +550,8 @@ ORG_NAME=
 LABELS=
 RUNNER_NAME=
 EOF
-chmod 600 /etc/github-runner.env
+chmod 640 /etc/github-runner.env
+chown root:"${RUNNER_USER}" /etc/github-runner.env
 
 systemctl daemon-reload
 systemctl enable github-runner
