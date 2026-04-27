@@ -21,7 +21,29 @@ provider "aws" {
 # Data sources – latest AMIs
 # ─────────────────────────────────────────
 
-# Latest Ubuntu 22.04 LTS (Jammy) AMI
+# Pre-baked GitHub runner AMI (built by Packer – has all tools pre-installed)
+# Falls back to latest vanilla Ubuntu 22.04 if no custom AMI exists yet.
+data "aws_ami" "runner_linux" {
+  most_recent = true
+  owners      = ["self"]
+
+  filter {
+    name   = "tag:Purpose"
+    values = ["github-runner"]
+  }
+
+  filter {
+    name   = "name"
+    values = ["github-runner-linux-*"]
+  }
+
+  filter {
+    name   = "state"
+    values = ["available"]
+  }
+}
+
+# Latest Ubuntu 22.04 LTS (Jammy) AMI – kept as fallback / for reference
 data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"] # Canonical
@@ -203,7 +225,7 @@ resource "aws_security_group" "instances" {
 
 resource "aws_launch_template" "runner" {
   name_prefix   = "${var.project_name}-runner-"
-  image_id      = data.aws_ami.ubuntu.id
+  image_id      = data.aws_ami.runner_linux.id
   instance_type = var.ubuntu_instance_type
   key_name      = var.key_name
 
@@ -229,6 +251,9 @@ resource "aws_launch_template" "runner" {
 
   # The runner name is injected at launch time via the RunnerName instance tag.
   # user_data reads it from the EC2 metadata service.
+  # NOTE: entrypoint/wrapper scripts and the runner binary are pre-baked into
+  # the AMI by Packer. user_data only writes /etc/github-runner.env and starts
+  # the pre-enabled systemd service.
   user_data = base64encode(templatefile("${path.module}/user_data.sh.tpl", {
     aws_region             = var.aws_region
     github_pat_secret_name = var.github_pat_secret_name
@@ -237,7 +262,6 @@ resource "aws_launch_template" "runner" {
     org_name               = var.github_runner_scope == "org" ? var.github_org_name : ""
     runner_labels          = var.github_runner_labels
     runner_name            = "__FROM_TAG__" # overridden at runtime from instance tag
-    entrypoint_script      = file("${path.module}/entrypoint.sh")
   }))
 
   tag_specifications {
