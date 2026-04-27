@@ -197,3 +197,9 @@ variable "windows_root_volume_size" {
   type        = number
   default     = 50
 }
+
+variable "linux_runner_ami_id" {
+  description = "ID of the pre-baked GitHub runner AMI (output of packer build). Stored here for reference only — Terraform uses a data source to auto-discover the latest AMI by tag."
+  type        = string
+  default     = ""
+}
