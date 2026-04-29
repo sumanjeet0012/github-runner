@@ -109,7 +109,12 @@ Expand-Archive -Path $runnerZip -DestinationPath $RUNNER_DIR -Force
 Remove-Item $runnerZip
 Write-Host "Runner extracted to $RUNNER_DIR."
 
-& "$RUNNER_DIR\bin\installdependencies.ps1" 2>&1 | Write-Host
+# installdependencies.ps1 was removed in newer runner versions - skip if not present
+if (Test-Path "$RUNNER_DIR\bin\installdependencies.ps1") {
+    & "$RUNNER_DIR\bin\installdependencies.ps1" 2>&1 | Write-Host
+} else {
+    Write-Host "installdependencies.ps1 not present (runner v2.334.0+), skipping."
+}
 
 # ─────────────────────────────────────────────────────────────
 # 13. Pre-bake runner entrypoint + local runner user
