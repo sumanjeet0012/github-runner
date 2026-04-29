@@ -42,10 +42,16 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
     Write-Log "Chocolatey already present - skipping."
 }
 
-Write-Log "=== Installing core dependencies (git, jq, awscli, docker-desktop) ==="
-foreach ($pkg in @("git", "jq", "awscli", "docker-desktop")) {
-    Write-Log "  Installing $pkg ..."
-    choco install $pkg -y --no-progress | Out-Null
+Write-Log "=== Installing core dependencies (git, jq, awscli) ==="
+# NOTE: Most tools are pre-installed in the AMI by Packer (provision-windows.ps1).
+# Only install what's strictly needed if somehow missing (fallback safety net).
+foreach ($pkg in @("git", "jq", "awscli")) {
+    if (-not (Get-Command ($pkg -replace "awscli","aws") -ErrorAction SilentlyContinue)) {
+        Write-Log "  Installing $pkg ..."
+        choco install $pkg -y --no-progress | Out-Null
+    } else {
+        Write-Log "  $pkg already present - skipping."
+    }
 }
 
 $machinePath = [System.Environment]::GetEnvironmentVariable("PATH", "Machine")
@@ -95,17 +101,22 @@ Write-Log "Runner name: $RUNNER_NAME"
 
 Write-Log "=== Downloading GitHub Actions Runner ==="
 $RunnerDir = "C:\actions-runner"
-New-Item -ItemType Directory -Force -Path $RunnerDir | Out-Null
-$ReleasesJson  = Invoke-RestMethod -Uri "https://api.github.com/repos/actions/runner/releases/latest" `
-                                   -Headers @{ "User-Agent" = "github-runner-bootstrap" }
-$RunnerVersion = $ReleasesJson.tag_name.TrimStart("v")
-$RunnerUrl     = "https://github.com/actions/runner/releases/download/v$RunnerVersion/actions-runner-win-x64-$RunnerVersion.zip"
-$RunnerZip     = Join-Path $env:TEMP "runner.zip"
-Write-Log "Downloading runner $RunnerVersion ..."
-Invoke-WebRequest -Uri $RunnerUrl -OutFile $RunnerZip -UseBasicParsing
-Expand-Archive -Path $RunnerZip -DestinationPath $RunnerDir -Force
-Remove-Item $RunnerZip
-Write-Log "Runner extracted to $RunnerDir."
+if (-not (Test-Path "$RunnerDir\run.cmd")) {
+    # Runner not pre-baked — download it now (fallback for non-Packer AMIs)
+    New-Item -ItemType Directory -Force -Path $RunnerDir | Out-Null
+    $ReleasesJson  = Invoke-RestMethod -Uri "https://api.github.com/repos/actions/runner/releases/latest" `
+                                       -Headers @{ "User-Agent" = "github-runner-bootstrap" }
+    $RunnerVersion = $ReleasesJson.tag_name.TrimStart("v")
+    $RunnerUrl     = "https://github.com/actions/runner/releases/download/v$RunnerVersion/actions-runner-win-x64-$RunnerVersion.zip"
+    $RunnerZip     = Join-Path $env:TEMP "runner.zip"
+    Write-Log "Downloading runner $RunnerVersion ..."
+    Invoke-WebRequest -Uri $RunnerUrl -OutFile $RunnerZip -UseBasicParsing
+    Expand-Archive -Path $RunnerZip -DestinationPath $RunnerDir -Force
+    Remove-Item $RunnerZip
+    Write-Log "Runner extracted to $RunnerDir."
+} else {
+    Write-Log "Runner already pre-baked in AMI at $RunnerDir - skipping download."
+}
 
 Write-Log "=== Obtaining runner registration token ==="
 $RunnerScope = "${runner_scope}"

@@ -120,7 +120,7 @@ variable "github_webhook_secret" {
 variable "runner_max_pool_size" {
   description = "Maximum number of concurrent EC2 runner instances. New jobs wait in SQS when the pool is full."
   type        = number
-  default     = 5
+  default     = 6
 
   validation {
     condition     = var.runner_max_pool_size >= 1 && var.runner_max_pool_size <= 50

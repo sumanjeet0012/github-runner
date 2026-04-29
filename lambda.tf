@@ -64,21 +64,12 @@ resource "aws_dynamodb_table" "runner_pool" {
   })
 }
 
-# Seed the counter row so it always exists
-resource "aws_dynamodb_table_item" "runner_pool_counter" {
-  table_name = aws_dynamodb_table.runner_pool.name
-  hash_key   = aws_dynamodb_table.runner_pool.hash_key
-
-  item = jsonencode({
-    pk            = { S = "pool" }
-    active_count  = { N = "0" }
-  })
-
-  lifecycle {
-    # Never overwrite after initial creation – Lambda owns this value
-    ignore_changes = [item]
-  }
-}
+# NOTE: The pool counter item (pk="pool") is seeded directly via AWS CLI or
+# by the Lambda function itself on first run. Managing it via Terraform
+# causes ConditionalCheckFailedException when the item already exists.
+# Use: aws dynamodb put-item --table-name libp2p-runner-runner-pool \
+#        --item '{"pk":{"S":"pool"},"active_count":{"N":"0"}}' \
+#        --region eu-north-1
 
 # ─────────────────────────────────────────
 # IAM role for Lambda

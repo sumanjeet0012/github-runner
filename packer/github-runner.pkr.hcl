@@ -18,7 +18,7 @@ variable "aws_region" {
 
 variable "instance_type" {
   type    = string
-  default = "t3.xlarge" # 4 vCPU / 16 GB – comfortable for Docker builds
+  default = "t3.medium" # 2 vCPU / 4 GB – sufficient for running bash provisioner scripts
 }
 
 variable "ami_name_prefix" {
@@ -28,7 +28,7 @@ variable "ami_name_prefix" {
 
 variable "go_version" {
   type    = string
-  default = "1.22.4"
+  default = "1.25.7"
 }
 
 variable "node_version" {
@@ -42,17 +42,17 @@ variable "rust_toolchain" {
 }
 
 # ─────────────────────────────────────────────────────────────
-# Source: latest Ubuntu 22.04 LTS (Jammy) x86_64
+# Source: latest Ubuntu 24.04 LTS (Noble) x86_64
 # ─────────────────────────────────────────────────────────────
 
 source "amazon-ebs" "ubuntu_linux" {
   region        = var.aws_region
   instance_type = var.instance_type
 
-  # Use latest Ubuntu 22.04 LTS from Canonical
+  # Use latest Ubuntu 24.04 LTS from Canonical
   source_ami_filter {
     filters = {
-      name                = "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
+      name                = "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"
       root-device-type    = "ebs"
       virtualization-type = "hvm"
     }
@@ -63,12 +63,13 @@ source "amazon-ebs" "ubuntu_linux" {
   ssh_username = "ubuntu"
 
   ami_name        = "${var.ami_name_prefix}-{{timestamp}}"
-  ami_description = "Pre-baked GitHub Actions self-hosted runner for py-libp2p and test-plans workflows (Linux x64)"
+  ami_description = "Pre-baked GitHub Actions self-hosted runner - Ubuntu 24.04 - all libp2p workflows (Linux x64)"
 
-  # Root volume: 50 GB – Docker images + build caches can grow large
+  # Root volume: 100 GB – transport-interop pulls many large Docker images;
+  # rust/go build caches + all pre-installed toolchains need headroom.
   launch_block_device_mappings {
     device_name           = "/dev/sda1"
-    volume_size           = 50
+    volume_size           = 100
     volume_type           = "gp3"
     delete_on_termination = true
   }
@@ -78,7 +79,7 @@ source "amazon-ebs" "ubuntu_linux" {
     ManagedBy  = "packer"
     Purpose    = "github-runner"
     Workflows  = "py-libp2p,test-plans"
-    BaseOS     = "ubuntu-22.04"
+    BaseOS     = "ubuntu-24.04"
     BuildDate  = "{{isotime}}"
   }
 }
